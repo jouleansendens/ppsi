@@ -52,6 +52,7 @@ export default function DataWarga() {
     const { data, error } = await supabase
       .from("warga")
       .select("*")
+      .eq("status_kehidupan", "Hidup") // <-- TAMBAHAN: Hanya tampilkan warga yang hidup
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -182,6 +183,7 @@ export default function DataWarga() {
               <span>
                 Total: <span className="font-semibold text-foreground">{filteredWarga.length}</span> warga
                 {filterRT !== "all" && <span className="text-primary"> • RT {filterRT}</span>}
+                <span className="text-primary font-medium"> (Hanya Warga Hidup)</span>
               </span>
             </div>
           </div>

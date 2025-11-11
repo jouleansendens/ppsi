@@ -10,16 +10,31 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { GENDER_OPTIONS } from "@/lib/constants";
+import { GENDER_OPTIONS, RT_OPTIONS } from "@/lib/constants"; // Import RT_OPTIONS
+
+// Ambil dari skema DB
+const RELIGION_OPTIONS = [
+  { value: "Islam", label: "Islam" },
+  { value: "Kristen", label: "Kristen" },
+  { value: "Katolik", label: "Katolik" },
+  { value: "Hindu", label: "Hindu" },
+  { value: "Buddha", label: "Buddha" },
+  { value: "Konghucu", label: "Konghucu" },
+];
 
 const formSchema = z.object({
   nama_bayi: z.string().min(1, "Nama bayi harus diisi"),
-  nik_bayi: z.string().optional(),
+  // NIK Bayi wajib diisi untuk masuk ke tabel warga
+  nik_bayi: z.string().min(16, "NIK harus 16 digit").max(16, "NIK harus 16 digit"),
   jenis_kelamin: z.enum(["Laki-laki", "Perempuan"]),
   tanggal_lahir: z.string().min(1, "Tanggal lahir harus diisi"),
   tempat_lahir: z.string().min(1, "Tempat lahir harus diisi"),
   nama_ayah: z.string().min(1, "Nama ayah harus diisi"),
   nama_ibu: z.string().min(1, "Nama ibu harus diisi"),
+  // Field tambahan untuk tabel warga
+  alamat: z.string().min(1, "Alamat harus diisi"),
+  rt: z.string().min(1, "RT harus dipilih"),
+  agama: z.string().min(1, "Agama harus dipilih"),
   keterangan: z.string().optional(),
 });
 
@@ -44,6 +59,9 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
       tempat_lahir: "",
       nama_ayah: "",
       nama_ibu: "",
+      alamat: "", // Tambahan
+      rt: "",       // Tambahan
+      agama: "",    // Tambahan
       keterangan: "",
     },
   });
@@ -59,6 +77,10 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         nama_ayah: kelahiran.nama_ayah || "",
         nama_ibu: kelahiran.nama_ibu || "",
         keterangan: kelahiran.keterangan || "",
+        // Asumsi data ini tidak di-edit dari form kelahiran
+        alamat: "",
+        rt: "",
+        agama: "",
       });
     } else {
       form.reset({
@@ -69,16 +91,28 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         tempat_lahir: "",
         nama_ayah: "",
         nama_ibu: "",
+        alamat: "",
+        rt: "",
+        agama: "",
         keterangan: "",
       });
     }
   }, [kelahiran, form]);
 
   const onSubmit = async (data: FormData) => {
+    // Mode edit tidak didukung untuk auto-insert ke tabel warga
+    // karena akan rumit. Asumsikan form ini hanya untuk 'Tambah Baru'
+    // jika menyangkut insert ke tabel warga.
+    if (kelahiran) {
+      toast({ title: "Error", description: "Mode edit belum didukung untuk sinkronisasi warga", variant: "destructive" });
+      return;
+    }
+
     try {
-      const submitData: any = {
+      // 1. Insert ke laporan_kelahiran
+      const submitLaporan: any = {
         nama_bayi: data.nama_bayi,
-        nik_bayi: data.nik_bayi || null,
+        nik_bayi: data.nik_bayi, // Wajib ada
         jenis_kelamin: data.jenis_kelamin,
         tanggal_lahir: data.tanggal_lahir,
         tempat_lahir: data.tempat_lahir,
@@ -87,18 +121,32 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         keterangan: data.keterangan || null,
       };
 
-      if (kelahiran) {
-        const { error } = await supabase
-          .from("laporan_kelahiran")
-          .update(submitData)
-          .eq("id", kelahiran.id);
-        if (error) throw error;
-        toast({ title: "Berhasil", description: "Data kelahiran berhasil diperbarui" });
-      } else {
-        const { error } = await supabase.from("laporan_kelahiran").insert([submitData]);
-        if (error) throw error;
-        toast({ title: "Berhasil", description: "Data kelahiran berhasil ditambahkan" });
+      const { error: laporanError } = await supabase.from("laporan_kelahiran").insert([submitLaporan]);
+      if (laporanError) throw laporanError;
+
+      // 2. Insert ke tabel warga
+      const submitWarga: any = {
+        nama: data.nama_bayi,
+        nik: data.nik_bayi,
+        tempat_lahir: data.tempat_lahir,
+        tanggal_lahir: data.tanggal_lahir,
+        jenis_kelamin: data.jenis_kelamin,
+        alamat: data.alamat,
+        rt: data.rt,
+        agama: data.agama,
+        status_perkawinan: "Belum Kawin", // Default untuk bayi
+        status_kehidupan: "Hidup", // Default untuk data baru
+        // Kolom 'rw' dan 'kewarganegaraan' akan memakai DEFAULT dari DB
+      };
+      
+      const { error: wargaError } = await supabase.from("warga").insert([submitWarga]);
+      
+      if (wargaError) {
+        // Jika gagal insert warga (misal NIK duplikat), beri pesan
+        throw new Error(`Laporan kelahiran berhasil, tapi gagal menambah ke data warga: ${wargaError.message}`);
       }
+      
+      toast({ title: "Berhasil", description: "Data kelahiran DAN data warga baru berhasil ditambahkan" });
       onSuccess();
       onOpenChange(false);
     } catch (error: any) {
@@ -122,7 +170,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                   <FormItem>
                     <FormLabel>Nama Bayi *</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} disabled={!!kelahiran} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -133,9 +181,9 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 name="nik_bayi"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>NIK Bayi</FormLabel>
+                    <FormLabel>NIK Bayi *</FormLabel>
                     <FormControl>
-                      <Input {...field} maxLength={16} />
+                      <Input {...field} maxLength={16} disabled={!!kelahiran} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -150,7 +198,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Jenis Kelamin *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={!!kelahiran}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue />
@@ -175,7 +223,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                   <FormItem>
                     <FormLabel>Tanggal Lahir *</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} />
+                      <Input type="date" {...field} disabled={!!kelahiran} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -190,7 +238,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 <FormItem>
                   <FormLabel>Tempat Lahir *</FormLabel>
                   <FormControl>
-                    <Input {...field} />
+                    <Input {...field} disabled={!!kelahiran} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -225,6 +273,77 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 )}
               />
             </div>
+
+            {/* --- FIELD BARU UNTUK WARGA --- */}
+            {!kelahiran && ( // Hanya tampilkan field ini saat 'Tambah Baru'
+              <>
+                <FormField
+                  control={form.control}
+                  name="alamat"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Alamat (Sesuai KK) *</FormLabel>
+                      <FormControl>
+                        <Textarea {...field} rows={3} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="rt"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>RT *</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pilih RT" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {RT_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="agama"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Agama *</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pilih Agama" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {RELIGION_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </>
+            )}
+            {/* --- AKHIR FIELD BARU --- */}
 
             <FormField
               control={form.control}
