@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,6 +27,8 @@ import {
 import { Baby, HeartCrack } from "lucide-react";
 import { KelahiranFormDialog } from "@/components/laporan/KelahiranFormDialog";
 import { KematianFormDialog } from "@/components/laporan/KematianFormDialog";
+import { KelahiranDetailDialog } from "@/components/laporan/KelahiranDetailDialog";
+import { KematianDetailDialog } from "@/components/laporan/KematianDetailDialog";
 
 export default function Laporan() {
   const [kelahiran, setKelahiran] = useState<any[]>([]);
@@ -34,6 +36,8 @@ export default function Laporan() {
   const [loading, setLoading] = useState(true);
   const [kelahiranDialogOpen, setKelahiranDialogOpen] = useState(false);
   const [kematianDialogOpen, setKematianDialogOpen] = useState(false);
+  const [kelahiranDetailOpen, setKelahiranDetailOpen] = useState(false);
+  const [kematianDetailOpen, setKematianDetailOpen] = useState(false);
   const [selectedKelahiran, setSelectedKelahiran] = useState<any>(null);
   const [selectedKematian, setSelectedKematian] = useState<any>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -74,6 +78,11 @@ export default function Laporan() {
     setKelahiranDialogOpen(true);
   };
 
+  const handleViewKelahiran = (item: any) => {
+    setSelectedKelahiran(item);
+    setKelahiranDetailOpen(true);
+  };
+
   const handleAddKematian = () => {
     setSelectedKematian(null);
     setKematianDialogOpen(true);
@@ -82,6 +91,11 @@ export default function Laporan() {
   const handleEditKematian = (item: any) => {
     setSelectedKematian(item);
     setKematianDialogOpen(true);
+  };
+
+  const handleViewKematian = (item: any) => {
+    setSelectedKematian(item);
+    setKematianDetailOpen(true);
   };
 
   const handleDelete = (type: 'kelahiran' | 'kematian', item: any) => {
@@ -153,9 +167,9 @@ export default function Laporan() {
         </div>
 
         <Tabs defaultValue="kelahiran" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="kelahiran" className="text-sm sm:text-base">Kelahiran</TabsTrigger>
-            <TabsTrigger value="kematian" className="text-sm sm:text-base">Kematian</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 h-10">
+            <TabsTrigger value="kelahiran" className="text-sm sm:text-base flex items-center justify-center">Kelahiran</TabsTrigger>
+            <TabsTrigger value="kematian" className="text-sm sm:text-base flex items-center justify-center">Kematian</TabsTrigger>
           </TabsList>
 
           <TabsContent value="kelahiran" className="space-y-3 sm:space-y-4">
@@ -201,10 +215,13 @@ export default function Laporan() {
                         <TableCell>{k.keterangan || "-"}</TableCell>
                         <TableCell>
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => handleEditKelahiran(k)}>
+                            <Button variant="ghost" size="sm" onClick={() => handleViewKelahiran(k)} title="Lihat Detail">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleEditKelahiran(k)} title="Edit">
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleDelete('kelahiran', k)} className="text-destructive hover:text-destructive">
+                            <Button variant="ghost" size="sm" onClick={() => handleDelete('kelahiran', k)} className="text-destructive hover:text-destructive" title="Hapus">
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
@@ -237,6 +254,9 @@ export default function Laporan() {
                             <p className="font-semibold">{k.nama_bayi}</p>
                           </div>
                           <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => handleViewKelahiran(k)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="sm" onClick={() => handleEditKelahiran(k)}>
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -308,10 +328,13 @@ export default function Laporan() {
                         <TableCell>{k.keterangan || "-"}</TableCell>
                         <TableCell>
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => handleEditKematian(k)}>
+                            <Button variant="ghost" size="sm" onClick={() => handleViewKematian(k)} title="Lihat Detail">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleEditKematian(k)} title="Edit">
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleDelete('kematian', k)} className="text-destructive hover:text-destructive">
+                            <Button variant="ghost" size="sm" onClick={() => handleDelete('kematian', k)} className="text-destructive hover:text-destructive" title="Hapus">
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
@@ -344,6 +367,9 @@ export default function Laporan() {
                             <p className="font-semibold">{k.nama_almarhum}</p>
                           </div>
                           <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => handleViewKematian(k)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="sm" onClick={() => handleEditKematian(k)}>
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -386,6 +412,18 @@ export default function Laporan() {
         onOpenChange={setKematianDialogOpen}
         kematian={selectedKematian}
         onSuccess={fetchData}
+      />
+
+      <KelahiranDetailDialog
+        open={kelahiranDetailOpen}
+        onOpenChange={setKelahiranDetailOpen}
+        kelahiran={selectedKelahiran}
+      />
+
+      <KematianDetailDialog
+        open={kematianDetailOpen}
+        onOpenChange={setKematianDetailOpen}
+        kematian={selectedKematian}
       />
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

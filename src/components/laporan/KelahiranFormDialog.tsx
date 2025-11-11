@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react"; // Import useState
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -10,7 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { GENDER_OPTIONS, RT_OPTIONS } from "@/lib/constants"; // Import RT_OPTIONS
+import { GENDER_OPTIONS, RT_OPTIONS } from "@/lib/constants";
 
 // Ambil dari skema DB
 const RELIGION_OPTIONS = [
@@ -24,7 +24,6 @@ const RELIGION_OPTIONS = [
 
 const formSchema = z.object({
   nama_bayi: z.string().min(1, "Nama bayi harus diisi"),
-  // NIK Bayi wajib diisi untuk masuk ke tabel warga
   nik_bayi: z.string().min(16, "NIK harus 16 digit").max(16, "NIK harus 16 digit"),
   jenis_kelamin: z.enum(["Laki-laki", "Perempuan"]),
   tanggal_lahir: z.string().min(1, "Tanggal lahir harus diisi"),
@@ -36,6 +35,10 @@ const formSchema = z.object({
   rt: z.string().min(1, "RT harus dipilih"),
   agama: z.string().min(1, "Agama harus dipilih"),
   keterangan: z.string().optional(),
+  
+  // Field baru untuk integrasi KK
+  keluarga_id: z.string().min(1, "Kartu Keluarga harus dipilih"),
+  hubungan_keluarga: z.string().min(1, "Hubungan keluarga harus diisi"),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -47,8 +50,19 @@ interface KelahiranFormDialogProps {
   onSuccess: () => void;
 }
 
+// Tipe baru untuk daftar KK
+type KeluargaLite = {
+  id: string;
+  nomor_kk: string;
+  kepala_keluarga: {
+    nama: string;
+  }
+};
+
 export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }: KelahiranFormDialogProps) {
   const { toast } = useToast();
+  const [keluargaList, setKeluargaList] = useState<KeluargaLite[]>([]);
+
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -59,15 +73,43 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
       tempat_lahir: "",
       nama_ayah: "",
       nama_ibu: "",
-      alamat: "", // Tambahan
-      rt: "",       // Tambahan
-      agama: "",    // Tambahan
+      alamat: "",
+      rt: "",
+      agama: "",
       keterangan: "",
+      keluarga_id: "",
+      hubungan_keluarga: "Anak", // Default
     },
   });
 
+  // Ambil daftar KK saat dialog dibuka
+  useEffect(() => {
+    async function fetchKeluarga() {
+      if (!open || (open && kelahiran)) return; // Hanya fetch saat tambah baru
+
+      const { data, error } = await supabase
+        .from("keluarga")
+        .select(`
+          id,
+          nomor_kk,
+          kepala_keluarga:warga!keluarga_kepala_keluarga_id_fkey (nama)
+        `)
+        .order("nomor_kk", { ascending: true });
+
+      if (error) {
+        toast({ title: "Error", description: "Gagal mengambil daftar KK", variant: "destructive" });
+      } else {
+        setKeluargaList(data as KeluargaLite[]);
+      }
+    }
+    
+    fetchKeluarga();
+  }, [open, kelahiran, toast]);
+
+
   useEffect(() => {
     if (kelahiran) {
+      // Mode edit, nonaktifkan integrasi (terlalu rumit untuk di-edit)
       form.reset({
         nama_bayi: kelahiran.nama_bayi || "",
         nik_bayi: kelahiran.nik_bayi || "",
@@ -77,12 +119,9 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         nama_ayah: kelahiran.nama_ayah || "",
         nama_ibu: kelahiran.nama_ibu || "",
         keterangan: kelahiran.keterangan || "",
-        // Asumsi data ini tidak di-edit dari form kelahiran
-        alamat: "",
-        rt: "",
-        agama: "",
       });
     } else {
+      // Mode tambah baru
       form.reset({
         nama_bayi: "",
         nik_bayi: "",
@@ -95,16 +134,17 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         rt: "",
         agama: "",
         keterangan: "",
+        keluarga_id: "",
+        hubungan_keluarga: "Anak",
       });
     }
   }, [kelahiran, form]);
 
   const onSubmit = async (data: FormData) => {
-    // Mode edit tidak didukung untuk auto-insert ke tabel warga
-    // karena akan rumit. Asumsikan form ini hanya untuk 'Tambah Baru'
-    // jika menyangkut insert ke tabel warga.
     if (kelahiran) {
-      toast({ title: "Error", description: "Mode edit belum didukung untuk sinkronisasi warga", variant: "destructive" });
+      toast({ title: "Info", description: "Edit laporan kelahiran belum mendukung update data warga/KK." });
+      // Logika edit sederhana (jika diperlukan) bisa ditambahkan di sini
+      onOpenChange(false);
       return;
     }
 
@@ -112,7 +152,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
       // 1. Insert ke laporan_kelahiran
       const submitLaporan: any = {
         nama_bayi: data.nama_bayi,
-        nik_bayi: data.nik_bayi, // Wajib ada
+        nik_bayi: data.nik_bayi,
         jenis_kelamin: data.jenis_kelamin,
         tanggal_lahir: data.tanggal_lahir,
         tempat_lahir: data.tempat_lahir,
@@ -120,11 +160,10 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         nama_ibu: data.nama_ibu,
         keterangan: data.keterangan || null,
       };
-
       const { error: laporanError } = await supabase.from("laporan_kelahiran").insert([submitLaporan]);
-      if (laporanError) throw laporanError;
+      if (laporanError) throw new Error(`Gagal simpan laporan: ${laporanError.message}`);
 
-      // 2. Insert ke tabel warga
+      // 2. Insert ke tabel warga dan ambil ID-nya
       const submitWarga: any = {
         nama: data.nama_bayi,
         nik: data.nik_bayi,
@@ -134,19 +173,38 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
         alamat: data.alamat,
         rt: data.rt,
         agama: data.agama,
-        status_perkawinan: "Belum Kawin", // Default untuk bayi
-        status_kehidupan: "Hidup", // Default untuk data baru
-        // Kolom 'rw' dan 'kewarganegaraan' akan memakai DEFAULT dari DB
+        status_perkawinan: "Belum Kawin",
+        status_kehidupan: "Hidup",
       };
       
-      const { error: wargaError } = await supabase.from("warga").insert([submitWarga]);
-      
+      const { data: newWargaData, error: wargaError } = await supabase
+        .from("warga")
+        .insert([submitWarga])
+        .select("id") // <-- Ambil ID dari warga yang baru dibuat
+        .single(); // <-- Pastikan hanya 1 data yang kembali
+
       if (wargaError) {
-        // Jika gagal insert warga (misal NIK duplikat), beri pesan
-        throw new Error(`Laporan kelahiran berhasil, tapi gagal menambah ke data warga: ${wargaError.message}`);
+        throw new Error(`Gagal menambah data warga: ${wargaError.message}`);
+      }
+      if (!newWargaData) {
+        throw new Error("Gagal mendapatkan ID warga baru setelah insert.");
+      }
+
+      const newWargaId = newWargaData.id;
+
+      // 3. Insert ke tabel anggota_keluarga
+      const submitAnggotaKeluarga = {
+        keluarga_id: data.keluarga_id,
+        warga_id: newWargaId,
+        hubungan_keluarga: data.hubungan_keluarga,
+      };
+
+      const { error: anggotaError } = await supabase.from("anggota_keluarga").insert([submitAnggotaKeluarga]);
+      if (anggotaError) {
+        throw new Error(`Gagal menambah warga ke KK: ${anggotaError.message}`);
       }
       
-      toast({ title: "Berhasil", description: "Data kelahiran DAN data warga baru berhasil ditambahkan" });
+      toast({ title: "Berhasil!", description: "Data kelahiran, warga, dan anggota KK berhasil ditambahkan." });
       onSuccess();
       onOpenChange(false);
     } catch (error: any) {
@@ -154,14 +212,19 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
     }
   };
 
+  const isEditMode = !!kelahiran;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{kelahiran ? "Edit" : "Tambah"} Laporan Kelahiran</DialogTitle>
+          <DialogTitle>{isEditMode ? "Edit" : "Tambah"} Laporan Kelahiran</DialogTitle>
+          {!isEditMode && <p className="text-sm text-muted-foreground">Mode tambah akan otomatis mendaftarkan bayi ke Data Warga dan Kartu Keluarga.</p>}
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            {/* ... (Field Nama Bayi, NIK, Jenis Kelamin, Tgl Lahir, Tempat Lahir, Nama Ayah, Nama Ibu tetap sama) ... */}
+
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -170,7 +233,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                   <FormItem>
                     <FormLabel>Nama Bayi *</FormLabel>
                     <FormControl>
-                      <Input {...field} disabled={!!kelahiran} />
+                      <Input {...field} disabled={isEditMode} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -183,7 +246,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                   <FormItem>
                     <FormLabel>NIK Bayi *</FormLabel>
                     <FormControl>
-                      <Input {...field} maxLength={16} disabled={!!kelahiran} />
+                      <Input {...field} maxLength={16} disabled={isEditMode} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -198,17 +261,13 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Jenis Kelamin *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} disabled={!!kelahiran}>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={isEditMode}>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         {GENDER_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -223,7 +282,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                   <FormItem>
                     <FormLabel>Tanggal Lahir *</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} disabled={!!kelahiran} />
+                      <Input type="date" {...field} disabled={isEditMode} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -238,7 +297,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 <FormItem>
                   <FormLabel>Tempat Lahir *</FormLabel>
                   <FormControl>
-                    <Input {...field} disabled={!!kelahiran} />
+                    <Input {...field} disabled={isEditMode} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -251,7 +310,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 name="nama_ayah"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Nama Ayah *</FormLabel>
+                    <FormLabel>Nama Ayah (Laporan) *</FormLabel>
                     <FormControl>
                       <Input {...field} />
                     </FormControl>
@@ -264,7 +323,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                 name="nama_ibu"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Nama Ibu *</FormLabel>
+                    <FormLabel>Nama Ibu (Laporan) *</FormLabel>
                     <FormControl>
                       <Input {...field} />
                     </FormControl>
@@ -274,9 +333,53 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
               />
             </div>
 
-            {/* --- FIELD BARU UNTUK WARGA --- */}
-            {!kelahiran && ( // Hanya tampilkan field ini saat 'Tambah Baru'
+            {/* --- FIELD BARU UNTUK WARGA & KK (Hanya mode Tambah) --- */}
+            {!isEditMode && (
               <>
+                <div className="pt-4 border-t">
+                  <h3 className="text-lg font-medium">Data Kependudukan</h3>
+                  <p className="text-sm text-muted-foreground">Isi data untuk mendaftarkan bayi ke Data Warga & KK.</p>
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="keluarga_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Pilih Kartu Keluarga (KK) *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pilih KK..." />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {keluargaList.map((kk) => (
+                            <SelectItem key={kk.id} value={kk.id}>
+                              {kk.nomor_kk} (Kepala Keluarga: {kk.kepala_keluarga?.nama || "N/A"})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="hubungan_keluarga"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Hubungan dalam Keluarga *</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="alamat"
@@ -306,9 +409,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                           </FormControl>
                           <SelectContent>
                             {RT_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -330,9 +431,7 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
                           </FormControl>
                           <SelectContent>
                             {RELIGION_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -361,9 +460,9 @@ export function KelahiranFormDialog({ open, onOpenChange, kelahiran, onSuccess }
 
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Batal
+Batal
               </Button>
-              <Button type="submit">{kelahiran ? "Perbarui" : "Simpan"}</Button>
+              <Button type="submit">{isEditMode ? "Perbarui" : "Simpan"}</Button>
             </div>
           </form>
         </Form>

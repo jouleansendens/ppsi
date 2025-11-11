@@ -7,9 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"; // <-- Import Popover
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"; // <-- Import Command
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Check, ChevronsUpDown } from "lucide-react"; // <-- Import Ikon
+import { cn } from "@/lib/utils"; // <-- Import cn
 
 const formSchema = z.object({
   warga_id: z.string().min(1, "Warga harus dipilih"),
@@ -37,6 +40,7 @@ type WargaLite = {
 export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: KematianFormDialogProps) {
   const { toast } = useToast();
   const [wargaList, setWargaList] = useState<WargaLite[]>([]);
+  const [popoverOpen, setPopoverOpen] = useState(false); // <-- State untuk Popover
   
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -57,7 +61,7 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
       const { data, error } = await supabase
         .from("warga")
         .select("id, nama, nik")
-        .eq("status_kehidupan", "Hidup") // Hanya ambil yang masih hidup
+        .eq("status_kehidupan", "Hidup")
         .order("nama", { ascending: true });
         
       if (error) {
@@ -92,16 +96,12 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
 
   const onSubmit = async (data: FormData) => {
     try {
-      // Dapatkan data warga yang dipilih dari state
       const selectedWarga = wargaList.find(w => w.id === data.warga_id);
       
-      // Jika mode 'Tambah Baru', warga wajib ada di list
       if (!selectedWarga && !kematian) {
          throw new Error("Warga yang dipilih tidak valid");
       }
 
-      // Jika mode 'Edit', ambil nama & NIK dari data 'kematian' prop
-      // Jika mode 'Tambah Baru', ambil dari 'selectedWarga'
       const namaAlmarhum = kematian ? kematian.nama_almarhum : selectedWarga!.nama;
       const nikAlmarhum = kematian ? kematian.nik : selectedWarga!.nik;
 
@@ -116,7 +116,6 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
       };
 
       if (kematian) {
-        // Mode Edit: Hanya update laporan kematian
         const { error } = await supabase
           .from("laporan_kematian")
           .update(submitData)
@@ -124,12 +123,9 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
         if (error) throw error;
         toast({ title: "Berhasil", description: "Data kematian berhasil diperbarui" });
       } else {
-        // Mode Tambah Baru:
-        // 1. Insert ke laporan_kematian
         const { error: laporError } = await supabase.from("laporan_kematian").insert([submitData]);
         if (laporError) throw laporError;
 
-        // 2. Update status di tabel warga
         const { error: updateWargaError } = await supabase
           .from("warga")
           .update({ 
@@ -139,7 +135,6 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
           .eq("id", data.warga_id);
 
         if (updateWargaError) {
-          // Laporan berhasil dibuat, tapi update warga gagal (user harus tahu)
           throw new Error(`Laporan kematian berhasil dibuat, tapi gagal update status warga: ${updateWargaError.message}`);
         }
         
@@ -153,11 +148,13 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
     }
   };
 
+  const isEditMode = !!kematian;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{kematian ? "Edit" : "Tambah"} Laporan Kematian</DialogTitle>
+          <DialogTitle>{isEditMode ? "Edit" : "Tambah"} Laporan Kematian</DialogTitle>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -166,31 +163,65 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
               control={form.control}
               name="warga_id"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="flex flex-col">
                   <FormLabel>Nama Almarhum (Warga) *</FormLabel>
-                  <Select 
-                    onValueChange={field.onChange} 
-                    value={field.value}
-                    disabled={!!kematian} // Disable ganti warga jika mode edit
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Pilih warga yang meninggal..." />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {wargaList.map((w) => (
-                        <SelectItem key={w.id} value={w.id}>
-                          {w.nama} (NIK: {w.nik})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          disabled={isEditMode}
+                          className={cn(
+                            "w-full justify-between",
+                            !field.value && "text-muted-foreground"
+                          )}
+                        >
+                          {field.value
+                            ? wargaList.find((w) => w.id === field.value)?.nama
+                            : "Pilih warga..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] max-h-[--radix-popover-content-available-height] p-0">
+                      <Command>
+                        <CommandInput placeholder="Cari warga (nama atau NIK)..." />
+                        <CommandList>
+                          <CommandEmpty>Tidak ada warga ditemukan.</CommandEmpty>
+                          <CommandGroup>
+                            {wargaList.map((w) => (
+                              <CommandItem
+                                value={`${w.nama} ${w.nik}`}
+                                key={w.id}
+                                onSelect={() => {
+                                  form.setValue("warga_id", w.id);
+                                  setPopoverOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    w.id === field.value ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <div>
+                                  <p>{w.nama}</p>
+                                  <p className="text-xs text-muted-foreground">{w.nik}</p>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
+            {/* ... (Field Tanggal Meninggal, Tempat, Sebab, Keterangan, dan Tombol) ... */}
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -252,7 +283,7 @@ export function KematianFormDialog({ open, onOpenChange, kematian, onSuccess }: 
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Batal
               </Button>
-              <Button type="submit">{kematian ? "Perbarui" : "Simpan"}</Button>
+              <Button type="submit">{isEditMode ? "Perbarui" : "Simpan"}</Button>
             </div>
           </form>
         </Form>
