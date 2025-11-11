@@ -100,7 +100,7 @@ export default function Auth() {
           </div>
           <div>
             <h1 className="text-3xl font-bold">Sistem Data Warga</h1>
-            <p className="text-muted-foreground mt-2">RW 08</p>
+            <p className="text-muted-foreground mt-2">RW 08 - Kelola Data dengan Mudah</p>
           </div>
         </div>
 
